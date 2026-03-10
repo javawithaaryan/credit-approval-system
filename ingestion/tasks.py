@@ -71,8 +71,9 @@ def ingest_data():
                 if row[0] is None:
                     continue
                 # Parse dates - handle both string and datetime objects
-                start_date = row[6]
-                end_date = row[7]
+                emis_paid_on_time = int(row[6])
+                start_date = row[7]
+                end_date = row[8]
                 if isinstance(start_date, str):
                     start_date = datetime.strptime(start_date, '%Y-%m-%d').date()
                 elif isinstance(start_date, datetime):
@@ -90,7 +91,7 @@ def ingest_data():
                     tenure=int(row[3]),
                     interest_rate=float(row[4]),
                     monthly_repayment=float(row[5]),
-                    emis_paid_on_time=int(row[8]),
+                    emis_paid_on_time=emis_paid_on_time,
                     start_date=start_date,
                     end_date=end_date,
                 ))
