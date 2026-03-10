@@ -1,17 +1,40 @@
-"""
-Celery tasks for background data ingestion.
-
-Reads customer_data.xlsx and loan_data.xlsx from the /app/data directory
-and bulk-creates Customer and Loan objects if the tables are empty.
-"""
 import os
-import logging
-from datetime import datetime
+from datetime import datetime, date
 
 from celery import shared_task
 from django.conf import settings
+import logging
 
 logger = logging.getLogger(__name__)
+
+
+def to_int(val):
+    if val is None:
+        return 0
+    if isinstance(val, (int, float)):
+        return int(val)
+    if isinstance(val, str):
+        try:
+            return int(float(val.strip()))
+        except (ValueError, TypeError):
+            return 0
+    return 0
+
+
+def to_date(val):
+    if val is None:
+        return None
+    if isinstance(val, date):
+        # datetime.datetime is a subclass of datetime.date, so this works for both
+        if hasattr(val, 'date'):
+            return val.date()
+        return val
+    if isinstance(val, str):
+        try:
+            return datetime.strptime(val.strip(), '%Y-%m-%d').date()
+        except (ValueError, TypeError):
+            return None
+    return None
 
 
 @shared_task(name='ingestion.tasks.ingest_data')
@@ -20,7 +43,7 @@ def ingest_data():
     Ingest customer and loan data from Excel files into the database.
 
     Only runs if the Customer and Loan tables are empty to prevent
-    duplicate ingestion. Uses bulk_create for efficiency.
+    duplicate ingestion. Uses bulk_create for efficiency and robustness.
     """
     from customers.models import Customer
     from loans.models import Loan
@@ -40,16 +63,19 @@ def ingest_data():
             for row in rows:
                 if row[0] is None:
                     continue
-                customers.append(Customer(
-                    customer_id=int(row[0]),
-                    first_name=str(row[1]).strip(),
-                    last_name=str(row[2]).strip(),
-                    age=int(row[3]),
-                    phone_number=int(row[4]),
-                    monthly_salary=int(row[5]),
-                    approved_limit=int(row[6]),
-                    current_debt=0.0,
-                ))
+                try:
+                    customers.append(Customer(
+                        customer_id=to_int(row[0]),
+                        first_name=str(row[1]).strip() if row[1] else "",
+                        last_name=str(row[2]).strip() if row[2] else "",
+                        age=to_int(row[3]),
+                        phone_number=to_int(row[4]),
+                        monthly_salary=to_int(row[5]),
+                        approved_limit=to_int(row[6]),
+                        current_debt=0.0,
+                    ))
+                except Exception as e:
+                    logger.error("Error parsing customer row %s: %s", row, e)
             Customer.objects.bulk_create(customers, batch_size=1000)
             wb.close()
             logger.info('Successfully ingested %d customers', len(customers))
@@ -70,31 +96,33 @@ def ingest_data():
             for row in rows:
                 if row[0] is None:
                     continue
-                # Parse dates - handle both string and datetime objects
-                emis_paid_on_time = int(row[6])
-                start_date = row[7]
-                end_date = row[8]
-                if isinstance(start_date, str):
-                    start_date = datetime.strptime(start_date, '%Y-%m-%d').date()
-                elif isinstance(start_date, datetime):
-                    start_date = start_date.date()
+                try:
+                    customer_id = to_int(row[0])
+                    loan_id = to_int(row[1])
+                    loan_amount = float(row[2]) if row[2] is not None else 0.0
+                    tenure = to_int(row[3])
+                    interest_rate = float(row[4]) if row[4] is not None else 0.0
+                    monthly_repayment = float(row[5]) if row[5] is not None else 0.0
+                    emis_paid_on_time = to_int(row[6])
+                    start_date = to_date(row[7])
+                    end_date = to_date(row[8])
 
-                if isinstance(end_date, str):
-                    end_date = datetime.strptime(end_date, '%Y-%m-%d').date()
-                elif isinstance(end_date, datetime):
-                    end_date = end_date.date()
+                    if not start_date or not end_date:
+                        continue
 
-                loans.append(Loan(
-                    customer_id=int(row[0]),
-                    loan_id=int(row[1]),
-                    loan_amount=float(row[2]),
-                    tenure=int(row[3]),
-                    interest_rate=float(row[4]),
-                    monthly_repayment=float(row[5]),
-                    emis_paid_on_time=emis_paid_on_time,
-                    start_date=start_date,
-                    end_date=end_date,
-                ))
+                    loans.append(Loan(
+                        customer_id=customer_id,
+                        loan_id=loan_id,
+                        loan_amount=loan_amount,
+                        tenure=tenure,
+                        interest_rate=interest_rate,
+                        monthly_repayment=monthly_repayment,
+                        emis_paid_on_time=emis_paid_on_time,
+                        start_date=start_date,
+                        end_date=end_date,
+                    ))
+                except Exception as e:
+                    logger.error("Error parsing loan row %s: %s", row, e)
             Loan.objects.bulk_create(loans, batch_size=1000)
             wb.close()
             logger.info('Successfully ingested %d loans', len(loans))
