@@ -1,5 +1,4 @@
-version: '3.8'
-
+# Credit Approval System Docker Compose
 services:
   db:
     image: postgres:15
