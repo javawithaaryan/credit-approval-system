@@ -95,12 +95,19 @@ def ingest_data():
             ws = wb.active
             rows = list(ws.iter_rows(min_row=2, values_only=True))
             loans = []
+            seen_loan_ids = set()
             for row in rows:
                 if row[0] is None:
                     continue
                 try:
                     customer_id = to_int(row[0])
                     loan_id = to_int(row[1])
+
+                    if loan_id in seen_loan_ids:
+                        logger.warning("Duplicate loan_id %d found in row %s, skipping", loan_id, row)
+                        continue
+                    seen_loan_ids.add(loan_id)
+
                     loan_amount = float(row[2]) if row[2] is not None else 0.0
                     tenure = to_int(row[3])
                     interest_rate = float(row[4]) if row[4] is not None else 0.0
