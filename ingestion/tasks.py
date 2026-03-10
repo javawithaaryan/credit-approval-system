@@ -13,6 +13,8 @@ def to_int(val):
         return 0
     if isinstance(val, (int, float)):
         return int(val)
+    if isinstance(val, (date, datetime)):
+        return 0
     if isinstance(val, str):
         try:
             return int(float(val.strip()))
